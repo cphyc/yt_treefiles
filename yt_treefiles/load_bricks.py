@@ -4,7 +4,7 @@ import yt.units as U
 import numpy as np
 
 
-def load_brick(filename, bbox=None):
+def load_brick(filename, bbox=None, ds=None):
     """Load a brick file as outputed by HaloFinder.
 
     You can pass a bbox (in Mpc) to force the box size."""
@@ -38,28 +38,59 @@ def load_brick(filename, bbox=None):
     def g(key):
         return [halos[i][key] for i in halos]
 
+    am_unit = (1, 'Msun*Mpc*km/s')
+    unit_dict = {
+        'particle_identifier': (1, '1'), 'particle_mass': (1e11, 'Msun'),
+        'particle_position_x': (1, 'Mpc'), 'particle_position_y': (1, 'Mpc'),
+        'particle_position_z': (1, 'Mpc'), 'particle_velocity_x': (1, 'km/s'),
+        'particle_velocity_y': (1, 'km/s'), 'particle_velocity_z': (1, 'km/s'),
+        'subhalo_level': (1, '1'), 'subhalo_hosthalo': (1, '1'),
+        'subhalo_host': (1, '1'),
+        'subhalo_number': (1, '1'), 'subhalo_next': (1, '1'),
+        'particle_angular_momentum_x': am_unit,
+        'particle_angular_momentum_y': am_unit,
+        'particle_angular_momentum_z': am_unit,
+        'virial_radius': (1, 'Mpc'), 'virial_mass': (1e11, 'Msun'),
+        'virial_temp': (1, 'K'),
+        'virial_vel': (1, 'km/s'),
+        'particle_spin': (1, '1'), 'particle_radius': (1, 'Mpc'),
+        'particle_axis_a': (1, 'Mpc'), 'particle_axis_b': (1, 'Mpc'),
+        'particle_axis_c': (1, 'Mpc')}
+
     data = {}
-    for key in ['particle_identifier', 'particle_mass',
-                'particle_position_x', 'particle_position_y',
-                'particle_position_z', 'particle_velocity_x',
-                'particle_velocity_y', 'particle_velocity_z',
-                'subhalo_level', 'subhalo_hosthalo', 'subhalo_host',
-                'subhalo_number', 'subhalo_next', 'L_x', 'L_y',
-                'L_z', 'virial_radius', 'virial_mass', 'virial_temp',
-                'virial_vel', 'particle_spin', 'particle_radius',
-                'particle_axis_a', 'particle_axis_b',
-                'particle_axis_c']:
-        data[key] = [halos[i][key] for i in halos]
+    for key in unit_dict:
+        intensity = unit_dict[key][0]
+        unit = unit_dict[key][1]
+        arr = np.array([halos[i][key] for i in halos]) * intensity
+        data[key] = (arr, unit)
 
     n_ref = 1
-    ppx, ppy, ppz = [data['particle_position_%s' % d] for d in ('x', 'y', 'z')]
 
-    if bbox is None:
-        bbox = np.array([[min(ppx), max(ppx)],
-                         [min(ppy), max(ppy)],
-                         [min(ppz), max(ppz)]])
-    return yt.load_particles(data, length_unit=U.Mpc, mass_unit=1e11*U.Msun,
-                             bbox=bbox, n_ref=n_ref)
+    ppx, ppy, ppz = [data['particle_position_%s' % d][0]
+                     for d in ('x', 'y', 'z')]
+
+    left = np.array([min(ppx), min(ppy), min(ppz)])
+    right = np.array([max(ppx), max(ppy), max(ppz)])
+
+    data['particle_position_x'] = (ppx - left[0]), 'Mpc'
+    data['particle_position_y'] = (ppy - left[1]), 'Mpc'
+    data['particle_position_z'] = (ppz - left[2]), 'Mpc'
+
+    right -= left
+    left -= left
+
+    bbox = np.array([left, right]).T
+
+    ds = yt.load_particles(data, length_unit=U.Mpc, mass_unit=1e11*U.Msun,
+                           bbox=bbox, n_ref=n_ref)
+
+    @yt.particle_filter('halos', requires=["particle_mass"],
+                        filtered_type='all')
+    def is_halo(pfilter, data):
+        return data[(pfilter.filtered_type, "particle_mass")] > 0
+
+    ds.add_particle_filter('halos')
+    return ds
 
 
 def _read_halo(f):
@@ -79,7 +110,9 @@ def _read_halo(f):
         (('particle_velocity_x',
           'particle_velocity_y',
           'particle_velocity_z'), 3, 'f'),
-        (('L_x', 'L_y', 'L_z'), 3, 'f'),
+        (('particle_angular_momentum_x',
+          'particle_angular_momentum_y',
+          'particle_angular_momentum_z'), 3, 'f'),
         (('particle_radius', 'particle_axis_a',
           'particle_axis_b', 'particle_axis_c'), 4, 'f'),
         (('particle_Ek', 'particle_Ep', 'particle_Et'), 3, 'f'),
