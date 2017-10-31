@@ -4,7 +4,7 @@ import yt.units as U
 import numpy as np
 
 
-def load_brick(filename, bbox=None, ds=None):
+def load_brick(filename, bbox=None, center=None, return_ds=True):
     """Load a brick file as outputed by HaloFinder.
 
     You can pass a bbox (in Mpc) to force the box size."""
@@ -33,6 +33,9 @@ def load_brick(filename, bbox=None, ds=None):
 
             halo_id = tmp.get('particle_identifier')
             halos[halo_id] = tmp
+
+    if not return_ds:
+        return halos
 
     # Now converts everything into yt-aware quantities
     def g(key):
@@ -69,8 +72,17 @@ def load_brick(filename, bbox=None, ds=None):
     ppx, ppy, ppz = [data['particle_position_%s' % d][0]
                      for d in ('x', 'y', 'z')]
 
-    left = np.array([min(ppx), min(ppy), min(ppz)])
-    right = np.array([max(ppx), max(ppy), max(ppz)])
+    if bbox is not None:
+        try:
+            bbox = np.array(bbox.to('Mpc'))
+        except:
+            bbox = np.array(bbox)
+        width = bbox[1] - bbox[0]
+        left = -width / 2
+        right = +width / 2
+    else:
+        left = np.array([min(ppx), min(ppy), min(ppz)])
+        right = np.array([max(ppx), max(ppy), max(ppz)])
 
     data['particle_position_x'] = (ppx - left[0]), 'Mpc'
     data['particle_position_y'] = (ppy - left[1]), 'Mpc'
@@ -93,10 +105,12 @@ def load_brick(filename, bbox=None, ds=None):
     return ds
 
 
-def _read_halo(f):
+def _read_halo(f, convert_pos=None):
     hattrs = {}
-    hattrs['particle_number'] = fpu.read_vector(f, 'i')[0]
-    hattrs['iparts'] = fpu.read_vector(f, 'i')
+    hattrs['particles'] = {}
+    # Read the particle in halo
+    hattrs['particles']['number'] = fpu.read_vector(f, 'i')[0]
+    hattrs['particles']['ids'] = fpu.read_vector(f, 'i')
 
     halos_attrs = (
         ('particle_identifier', 1, 'i'),
